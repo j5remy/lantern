@@ -2,7 +2,7 @@
 
 Tensor implementation.
 
-- supports basic operations (add, matmul, div, etc)
+- supports basic operations (add, sub, mul, matmul, etc.)
 - supports auto differentiation
 - accelerated with CUDA
 
@@ -28,10 +28,30 @@ class Tensor:
     def __repr__(self) -> str:
         return f"Tensor({self.data}, requires_grad={self.requires_grad}, shape={self.data.shape}, dtype={self.data.dtype})"
     
-    def __add__(self, other) -> 'Tensor':
+    def __add__(self, other: "Tensor") -> "Tensor":
+        add_tensors = cp.ElementwiseKernel(
+            "T x, T y",
+            "T z",
+            "z = x + y",
+            "add_tensors"
+        )
+
+        return Tensor(add_tensors(self.data, other.data))
+    
+    def __sub__(self, other: "Tensor") -> "Tensor":
         pass
+
+    def __mul__(self, other: "Tensor") -> "Tensor":
+        pass
+
+    def __matmul__(self, other: "Tensor") -> "Tensor":
+        pass
+
     
 if __name__ == "__main__":
-    data = cp.ndarray((3, 3), dtype=cp.float32)
-    tensor = Tensor([1,2,3,4,5])
-    print(tensor)
+    tensor1 = Tensor(cp.random.rand(2, 2, 2) * 100)
+    tensor2 = Tensor(cp.random.rand(2, 2, 2) * 100)
+    print("Tensor 1: ", tensor1)
+    print("Tensor 2: ", tensor2)
+    result = tensor1 + tensor2
+    print(result)
