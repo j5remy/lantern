@@ -2,18 +2,21 @@
 
 Tensor implementation.
 
-- supports basic operations (add, sub, mul, matmul, etc.)
+- supports basic operations (add, sub, div, matmul, etc.)
 - supports auto differentiation
 - accelerated with CUDA
 
 """
 
 import cupy as cp
+import time
+
+import cupy as cp
 
 class Tensor:
     
     def __init__(self, data, requires_grad=False) -> None:
-        if isinstance(data, list) or isinstance(data, tuple):
+        if isinstance(data, (list, tuple)):
             data = cp.array(data, dtype=cp.float32)
         elif isinstance(data, cp.ndarray):
             data = data.astype(cp.float32)
@@ -23,35 +26,79 @@ class Tensor:
         self.data = data
         self.requires_grad = requires_grad
         self.grad = None
-        self._backward = lambda: None
+        self._backward = lambda: None  # Placeholder for autograd
+
 
     def __repr__(self) -> str:
         return f"Tensor({self.data}, requires_grad={self.requires_grad}, shape={self.data.shape}, dtype={self.data.dtype})"
-    
-    def __add__(self, other: "Tensor") -> "Tensor":
-        add_tensors = cp.ElementwiseKernel(
-            "T x, T y",
-            "T z",
-            "z = x + y",
-            "add_tensors"
-        )
 
-        return Tensor(add_tensors(self.data, other.data))
+    def backward(self):
+        if self.grad is None:
+            self.grad = cp.ones_like(self.data)  # Initialize gradient as ones
+        
+        self._backward()  # Compute gradients
     
-    def __sub__(self, other: "Tensor") -> "Tensor":
-        pass
+    # Generic function for element-wise operations
+    def _elementwise_op(self, other, op, op_name):
+        other = other if isinstance(other, Tensor) else Tensor(other)
+        kernel = cp.ElementwiseKernel("T x, T y", "T z", f"z = x {op} y", op_name)
+        out = Tensor(kernel(self.data, other.data), requires_grad=self.requires_grad or other.requires_grad)
 
-    def __mul__(self, other: "Tensor") -> "Tensor":
-        pass
+        def _backward():
+            if self.requires_grad:
+                self.grad = out.grad if self.grad is None else self.grad + out.grad
+            if other.requires_grad:
+                other.grad = out.grad if other.grad is None else other.grad + out.grad
+
+        out._backward = _backward
+        return out
+
+    # Basic Operations
+    def __add__(self, other): return self._elementwise_op(other, "+", "add_tensors")
+    def __sub__(self, other): return self._elementwise_op(other, "-", "sub_tensors")
+    def __mul__(self, other): return self._elementwise_op(other, "*", "mul_tensors")
+    def __truediv__(self, other): return self._elementwise_op(other, "/", "div_tensors")
 
     def __matmul__(self, other: "Tensor") -> "Tensor":
-        pass
+        other = other if isinstance(other, Tensor) else Tensor(other)
+        assert self.data.shape[-1] == other.data.shape[0], "Matrix dimensions do not match for matmul."
 
+        out = Tensor(self.data @ other.data, requires_grad=self.requires_grad or other.requires_grad)
+
+        def _backward():
+            if self.requires_grad:
+                self.grad = out.grad @ other.data.T if self.grad is None else self.grad + out.grad @ other.data.T
+            if other.requires_grad:
+                other.grad = self.data.T @ out.grad if other.grad is None else other.grad + self.data.T @ out.grad
+
+        out._backward = _backward
+        return out
     
+    def sum(self, axis=None):
+        out = Tensor(self.data.sum(axis=axis, keepdims=True), requires_grad=self.requires_grad)
+
+        def _backward():
+            if self.requires_grad:
+                self.grad = cp.ones_like(self.data) * out.grad if not self.grad else self.grad + cp.ones_like(self.data) * out.grad
+
+        out._backward = _backward
+        return out
+    
+    def mean(self, axis=None):
+        out = Tensor(self.data.mean(axis=axis, keepdims=True), requires_grad=self.requires_grad)
+
+        def _backward():
+            if self.requires_grad:
+                self.grad = (cp.ones_like(self.data) / self.data.size) * out.grad if not self.grad else self.grad + (cp.ones_like(self.data) / self.data.size) * out.grad
+
+        out._backward = _backward
+        return out
+
 if __name__ == "__main__":
-    tensor1 = Tensor(cp.random.rand(2, 2, 2) * 100)
-    tensor2 = Tensor(cp.random.rand(2, 2, 2) * 100)
-    print("Tensor 1: ", tensor1)
-    print("Tensor 2: ", tensor2)
-    result = tensor1 + tensor2
+    tensor1 = Tensor(cp.random.rand(100, 100, 100))
+    tensor2 = Tensor(cp.random.rand(100, 100, 100))
+    start = time.time()
+    result = tensor1 @ tensor2
+    end = time.time()
+    print(f"Elapsed time: {end - start} sec")
     print(result)
